@@ -10,6 +10,7 @@ from wordcloud import WordCloud
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
 import io
 from fpdf import FPDF
+import plotly.graph_objects as go
 
 # ==========================================
 # 1. SETUP PAGE & KONFIGURASI
@@ -66,11 +67,11 @@ if menu == "1. Analisis Komentar Tunggal":
     user_input = st.text_area("Masukkan Komentar:", placeholder="Contoh: Timnas mainnya bagus banget hari ini, bangga!")
 
     # Tombol Eksekusi
-    if st.button("Analisis Sentimen", type="primary"):
+    if st.button("🚀 Analisis Sentimen", type="primary"):
         if user_input.strip() == "":
             st.warning("Komentarnya jangan kosong dong, bro!")
         else:
-            with st.spinner("Model sedang berpikir..."):
+            with st.spinner("Model sedang menganalisis pola kalimat..."):
                 # A. Preprocessing
                 clean_text = preprocess_text(user_input)
 
@@ -80,79 +81,94 @@ if menu == "1. Analisis Komentar Tunggal":
                 # C. Prediksi dengan Model
                 with torch.no_grad():
                     outputs = model(**inputs)
-                    logits = outputs.logits
-                    probs = F.softmax(logits, dim=1).squeeze()
+                    probs = F.softmax(outputs.logits, dim=1).squeeze()
 
-                # Ambil probabilitas untuk ketiga kelas (urutan: 0=Positif, 1=Netral, 2=Negatif)
                 prob_positif = probs[0].item() * 100
                 prob_netral = probs[1].item() * 100
                 prob_negatif = probs[2].item() * 100
 
-                # Dapatkan class ID pemenang
                 predicted_class_id = torch.argmax(probs).item()
                 label_map = {0: "Positif", 1: "Netral", 2: "Negatif"}
                 sentiment = label_map[predicted_class_id]
-                
-                # Confidence score pemenang (dalam persen)
                 confidence_score = max(prob_positif, prob_netral, prob_negatif)
 
                 # D. Logika Penjelasan Dinamis (Summary)
-                alasan_kalimat = ""
-                alasan_angka = ""
-
-                # 1. Alasan kenapa masuk kelas tersebut
                 if sentiment == "Positif":
-                    alasan_kalimat = "Berdasarkan pola bahasa yang dipelajari selama pelatihan, model mendeteksi adanya kosakata atau frasa yang menunjukkan dukungan, pujian, atau rasa bangga terhadap performa Timnas Indonesia."
+                    alasan_kalimat = "Berdasarkan pola bahasa, model mendeteksi adanya kosakata yang menunjukkan dukungan, pujian, atau rasa bangga terhadap performa Timnas Indonesia."
                 elif sentiment == "Negatif":
-                    alasan_kalimat = "Model mengidentifikasi adanya pola kalimat yang mengandung kritik, kekecewaan, cacian, atau nada pesimis terhadap pemain, pelatih, maupun permainan Timnas."
+                    alasan_kalimat = "Model mengidentifikasi adanya pola kalimat yang mengandung kritik, kekecewaan, atau nada pesimis terhadap pemain maupun pelatih Timnas."
                 else:
-                    alasan_kalimat = "Model tidak menemukan kecenderungan emosi yang kuat. Kalimat ini diklasifikasikan sebagai netral karena sifatnya yang informatif, berupa pertanyaan biasa, atau sekadar komentar spam yang tidak memihak."
+                    alasan_kalimat = "Model tidak menemukan kecenderungan emosi yang kuat. Kalimat ini diklasifikasikan sebagai netral karena sifatnya yang informatif atau ambigu."
 
-                # 2. Alasan kenapa nilainya segitu (Berdasarkan Confidence Score)
                 if confidence_score >= 90:
-                    alasan_angka = f"Model sangat yakin (confidence: {confidence_score:.1f}%) dengan prediksi ini karena emosi dalam kalimat sangat eksplisit dan mudah dikenali."
+                    alasan_angka = f"Model **sangat yakin** dengan prediksi ini karena emosi dalam kalimat sangat eksplisit."
                 elif confidence_score >= 70:
-                    alasan_angka = f"Model cukup yakin (confidence: {confidence_score:.1f}%) dengan prediksi ini. Meskipun begitu, masih ada sedikit ambiguitas atau gaya bahasa gaul yang membuat probabilitasnya tidak mencapai maksimal."
+                    alasan_angka = f"Model **cukup yakin** dengan prediksi ini, meskipun masih ada sedikit ambiguitas gaya bahasa."
                 else:
-                    # Kalau confidence rendah, berarti model agak bingung antara 2 label
-                    label_terbesar_kedua = ""
-                    if sentiment == "Positif":
-                        label_terbesar_kedua = "Netral" if prob_netral > prob_negatif else "Negatif"
-                    elif sentiment == "Negatif":
-                        label_terbesar_kedua = "Netral" if prob_netral > prob_positif else "Positif"
-                    else:
-                        label_terbesar_kedua = "Positif" if prob_positif > prob_negatif else "Negatif"
-                        
-                    alasan_angka = f"Model kurang yakin (confidence hanya {confidence_score:.1f}%). Hal ini terjadi karena gaya bahasa yang digunakan mengandung unsur sarkasme, singkatan yang rumit, atau emosi yang campur aduk, sehingga model juga melihat adanya potensi sentimen {label_terbesar_kedua} pada komentar ini."
+                    alasan_angka = f"Model **kurang yakin** karena gaya bahasa mengandung unsur sarkasme, atau emosi yang campur aduk antar sentimen."
 
-                # Gabungkan penjelasan
                 penjelasan_lengkap = f"{alasan_kalimat} {alasan_angka}"
 
                 # E. Tampilkan Hasil (UI Output)
                 st.markdown("---")
                 st.subheader("📊 Hasil Analisis")
 
-                col1, col2 = st.columns(2)
+                # Bikin layout 2 kolom proporsional (kiri untuk teks, kanan untuk grafik)
+                col1, col2 = st.columns([1.2, 1])
+                
                 with col1:
                     st.metric(label="Prediksi Sentimen", value=sentiment)
-                with col2:
-                    # Menampilkan confidence score dalam bentuk Persen
-                    st.metric(label="Tingkat Keyakinan (Confidence)", value=f"{confidence_score:.1f}%")
+                    st.info(f"**💡 Mengapa hasilnya demikian?**\n\n{penjelasan_lengkap}")
+                    
+                    # FITUR BARU: Di Balik Layar (Preprocessing)
+                    with st.expander("🔍 Di Balik Layar: Proses Preprocessing Teks"):
+                        st.write("**Teks Asli (Kotor):**")
+                        st.code(user_input, language="text")
+                        st.write("**Teks Bersih (Yang dibaca AI):**")
+                        st.code(clean_text, language="text")
+                        st.caption("Huruf kapital, tanda baca, link, dan emoji telah dihapus agar model lebih fokus pada makna kata dasar.")
 
-                st.info(f"**💡 Mengapa hasilnya demikian?**\n\n{penjelasan_lengkap}")
-                
-                # Opsional: Tampilkan detail probabilitas ketiga kelas biar makin ilmiah
-                with st.expander("Lihat Detail Probabilitas Semua Kelas"):
-                    st.write(f"- 🟢 Positif: {prob_positif:.2f}%")
-                    st.write(f"- ⚪ Netral: {prob_netral:.2f}%")
-                    st.write(f"- 🔴 Negatif: {prob_negatif:.2f}%")
+                with col2:
+                    # FITUR BARU: Gauge Chart (Speedometer)
+                    # Menentukan warna speedometer berdasarkan sentimen
+                    warna_bar = "#95a5a6" # Default Abu-abu
+                    if sentiment == "Positif":
+                        warna_bar = "#2ecc71" # Hijau
+                    elif sentiment == "Negatif":
+                        warna_bar = "#e74c3c" # Merah
+                        
+                    fig_gauge = go.Figure(go.Indicator(
+                        mode = "gauge+number",
+                        value = confidence_score,
+                        title = {'text': "Tingkat Keyakinan Model", 'font': {'size': 18}},
+                        number = {'suffix': "%", 'valueformat': ".1f", 'font': {'size': 40, 'color': warna_bar}},
+                        gauge = {
+                            'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "darkblue"},
+                            'bar': {'color': warna_bar},
+                            'bgcolor': "white",
+                            'borderwidth': 2,
+                            'bordercolor': "gray",
+                            'steps': [
+                                {'range': [0, 50], 'color': "#f0f2f6"},
+                                {'range': [50, 80], 'color': "#e1e4e8"}
+                            ],
+                        }
+                    ))
+                    
+                    # Menyesuaikan margin biar rapi di kolom kanan
+                    fig_gauge.update_layout(margin=dict(l=20, r=20, t=50, b=20), height=280)
+                    st.plotly_chart(fig_gauge, width='stretch')
+                    
+                    # Detail Probabilitas dipindah ke bawah grafik
+                    with st.expander("📈 Lihat Detail Probabilitas Semua Kelas"):
+                        st.write(f"- 🟢 Positif: {prob_positif:.2f}%")
+                        st.write(f"- ⚪ Netral: {prob_netral:.2f}%")
+                        st.write(f"- 🔴 Negatif: {prob_negatif:.2f}%")
                     
 # ----------------------------------------------------
 # MENU 2: ANALISIS DATASET (TANPA LABEL)
 # ----------------------------------------------------
-# ----------------------------------------------------
-# MENU 2: ANALISIS DATASET (TANPA LABEL)
-# ----------------------------------------------------
+
 elif menu == "2. Analisis Dataset":
     st.title("📊 Analisis Dataset Komentar")
     st.write("Upload file CSV/Excel tanpa label. Sistem akan mengklasifikasikan, mengukur probabilitas, dan membuatkan laporan otomatis.")
