@@ -1,0 +1,13 @@
+# Mengabaikan virtual environment
+env/
+venv/
+
+# Mengabaikan folder model (karena ukurannya ratusan MB)
+model_indobert_timnas/
+
+# Mengabaikan file cache Python
+__pycache__/
+*.pyc
+
+# Mengabaikan file temporary gambar/PDF yang di-generate Streamlit
+temp_*.png
