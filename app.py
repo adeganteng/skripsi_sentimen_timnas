@@ -11,6 +11,7 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support, con
 import io
 from fpdf import FPDF
 import plotly.graph_objects as go
+from streamlit_option_menu import option_menu
 
 # ==========================================
 # 1. SETUP PAGE & KONFIGURASI
@@ -43,14 +44,34 @@ def preprocess_text(text):
 # ==========================================
 # 3. SIDEBAR NAVIGASI
 # ==========================================
+# ==========================================
+# 3. SIDEBAR NAVIGASI (UI PREMIUM)
+# ==========================================
 with st.sidebar:
-    st.title("⚽ Navigasi Utama")
-    menu = st.radio(
-        "Pilih Mode Analisis:",
-        ("1. Analisis Komentar Tunggal", "2. Analisis Dataset", "3. Evaluasi Model")
-    )
+    st.markdown("<h2 style='text-align: center;'>⚽ Sentimen Timnas</h2>", unsafe_allow_html=True)
     st.markdown("---")
-    st.write("© 2026 - Ade Wicaksono")
+    
+    # Membuat Menu Estetik
+    menu = option_menu(
+        menu_title=None,  # Kita kosongin karena udah ada judul di atas
+        options=["Komentar Tunggal", "Analisis Dataset", "Evaluasi Model"],
+        icons=["chat-quote", "bar-chart-line", "clipboard-data"], # Menggunakan Bootstrap Icons
+        default_index=0,
+        styles={
+            "container": {"padding": "0!important", "background-color": "transparent"},
+            "icon": {"color": "#ff4b4b", "font-size": "18px"}, 
+            "nav-link": {
+                "font-size": "16px", 
+                "text-align": "left", 
+                "margin": "0px", 
+                "--hover-color": "#f0f2f6"
+            },
+            "nav-link-selected": {"background-color": "#ff4b4b", "color": "white", "font-weight": "bold"},
+        }
+    )
+    
+    st.markdown("---")
+    st.caption("© 2026 - Ade Wicaksono")
 
 # ==========================================
 # 4. LOGIKA HALAMAN MENU
@@ -59,7 +80,7 @@ with st.sidebar:
 # ----------------------------------------------------
 # MENU 1: ANALISIS KOMENTAR TUNGGAL
 # ----------------------------------------------------
-if menu == "1. Analisis Komentar Tunggal":
+if menu == "Komentar Tunggal":
     st.title("🔍 Analisis Komentar Tunggal")
     st.write("Masukkan 1 komentar terkait Timnas Indonesia untuk dianalisis oleh model IndoBERT.")
 
@@ -169,7 +190,7 @@ if menu == "1. Analisis Komentar Tunggal":
 # MENU 2: ANALISIS DATASET (TANPA LABEL)
 # ----------------------------------------------------
 
-elif menu == "2. Analisis Dataset":
+elif menu == "Analisis Dataset":
     st.title("📊 Analisis Dataset Komentar")
     st.write("Upload file CSV/Excel tanpa label. Sistem akan mengklasifikasikan, mengukur probabilitas, dan membuatkan laporan otomatis.")
 
@@ -430,7 +451,7 @@ elif menu == "2. Analisis Dataset":
 # ----------------------------------------------------
 # MENU 3: EVALUASI PERFORMA MODEL
 # ----------------------------------------------------
-elif menu == "3. Evaluasi Model":
+elif menu == "Evaluasi Model":
     st.title("📈 Evaluasi Performa Model IndoBERT")
     st.write("Upload dataset pengujian (Testing) yang **sudah memiliki label asli** untuk mengukur tingkat akurasi model.")
 
@@ -465,108 +486,150 @@ elif menu == "3. Evaluasi Model":
                             pred_id = torch.argmax(F.softmax(outputs.logits, dim=1)).item()
                         y_pred.append(pred_id)
 
-                    # Kalkulasi Metrik & Matriks
-                    acc = accuracy_score(y_true, y_pred)
-                    precision, recall, f1, _ = precision_recall_fscore_support(y_true, y_pred, average='macro')
+                    # ==========================================
+                    # KALKULASI METRIK & MATRIKS (OvR & GABUNGAN)
+                    # ==========================================
                     cm = confusion_matrix(y_true, y_pred, labels=[0, 1, 2])
                     total_data = len(df_test)
                     
-                    # ==========================================
-                    # 1. VISUALISASI CONFUSION MATRIX 
-                    # ==========================================
-                    st.markdown("---")
-                    st.subheader("🧩 1. Visualisasi Confusion Matrix")
-                    st.write("Detail sebaran tebakan model. Angka di garis diagonal adalah tebakan yang benar.")
-                    
-                    label_names = ['Positif', 'Netral', 'Negatif']
-                    fig_cm, ax_cm = plt.subplots(figsize=(8, 6))
-                    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=label_names, yticklabels=label_names, ax=ax_cm)
-                    ax_cm.set_ylabel('Label Aktual (Asli)')
-                    ax_cm.set_xlabel('Label Prediksi (Model)')
-                    st.pyplot(fig_cm)
-                    fig_cm.savefig("temp_cm.png")
-
-                    # ==========================================
-                    # 2. RINCIAN ANGKA MATRIKS PER KELAS (BARU!)
-                    # ==========================================
-                    # Ekstrak angka TP, FP, FN per kelas dari matriks
-                    # Format: cm[baris][kolom]
-                    
-                    # Kelas POSITIF (Index 0)
+                    # Ekstrak OvR (One-vs-Rest)
+                    # POSITIF
                     tp_pos = cm[0][0]
-                    fn_pos = cm[0][1] + cm[0][2] # Aktual positif tapi ditebak netral/negatif
-                    fp_pos = cm[1][0] + cm[2][0] # Aktual netral/negatif tapi ditebak positif
-                    
-                    # Kelas NETRAL (Index 1)
+                    fn_pos = cm[0][1] + cm[0][2]
+                    fp_pos = cm[1][0] + cm[2][0]
+                    tn_pos = total_data - (tp_pos + fn_pos + fp_pos)
+                    prec_pos = tp_pos / (tp_pos + fp_pos) if (tp_pos + fp_pos) > 0 else 0
+                    rec_pos = tp_pos / (tp_pos + fn_pos) if (tp_pos + fn_pos) > 0 else 0
+                    f1_pos = 2 * (prec_pos * rec_pos) / (prec_pos + rec_pos) if (prec_pos + rec_pos) > 0 else 0
+
+                    # NETRAL
                     tp_net = cm[1][1]
                     fn_net = cm[1][0] + cm[1][2]
                     fp_net = cm[0][1] + cm[2][1]
-                    
-                    # Kelas NEGATIF (Index 2)
+                    tn_net = total_data - (tp_net + fn_net + fp_net)
+                    prec_net = tp_net / (tp_net + fp_net) if (tp_net + fp_net) > 0 else 0
+                    rec_net = tp_net / (tp_net + fn_net) if (tp_net + fn_net) > 0 else 0
+                    f1_net = 2 * (prec_net * rec_net) / (prec_net + rec_net) if (prec_net + rec_net) > 0 else 0
+
+                    # NEGATIF
                     tp_neg = cm[2][2]
                     fn_neg = cm[2][0] + cm[2][1]
                     fp_neg = cm[0][2] + cm[1][2]
+                    tn_neg = total_data - (tp_neg + fn_neg + fp_neg)
+                    prec_neg = tp_neg / (tp_neg + fp_neg) if (tp_neg + fp_neg) > 0 else 0
+                    rec_neg = tp_neg / (tp_neg + fn_neg) if (tp_neg + fn_neg) > 0 else 0
+                    f1_neg = 2 * (prec_neg * rec_neg) / (prec_neg + rec_neg) if (prec_neg + rec_neg) > 0 else 0
 
+                    # METRIK GABUNGAN (MACRO)
                     total_benar = tp_pos + tp_net + tp_neg
+                    acc = accuracy_score(y_true, y_pred)
+                    precision, recall, f1, _ = precision_recall_fscore_support(y_true, y_pred, average='macro')
 
-                    st.markdown("##### 📌 Rincian Nilai Evaluasi Tiap Sentimen:")
-                    col_p, col_nt, col_ng = st.columns(3)
-                    
-                    with col_p:
-                        st.info(f"**🟢 Sentimen Positif**\n\n- **True Positif (TP):** {tp_pos} *(Tebakan Tepat)*\n- **False Positif (FP):** {fp_pos} *(Salah nebak sbg Positif)*\n- **False Negatif (FN):** {fn_pos} *(Gagal nembak Positif)*")
-                    with col_nt:
-                        st.warning(f"**⚪ Sentimen Netral**\n\n- **True Netral (TP):** {tp_net} *(Tebakan Tepat)*\n- **False Netral (FP):** {fp_net} *(Salah nebak sbg Netral)*\n- **False Negatif (FN):** {fn_net} *(Gagal nembak Netral)*")
-                    with col_ng:
-                        st.error(f"**🔴 Sentimen Negatif**\n\n- **True Negatif (TP):** {tp_neg} *(Tebakan Tepat)*\n- **False Negatif (FP):** {fp_neg} *(Salah nebak sbg Negatif)*\n- **False Negatif (FN):** {fn_neg} *(Gagal nembak Negatif)*")
-
-                    # ==========================================
-                    # 3. HASIL EVALUASI METRIK 
-                    # ==========================================
                     st.markdown("---")
-                    st.subheader("📊 2. Hasil Evaluasi Metrik (Macro-Average)")
-                    col1, col2, col3, col4 = st.columns(4)
-                    col1.metric("Akurasi (Accuracy)", f"{acc*100:.1f}%")
-                    col2.metric("Presisi (Precision)", f"{precision*100:.1f}%")
-                    col3.metric("Recall", f"{recall*100:.1f}%")
-                    col4.metric("F1-Score", f"{f1*100:.1f}%")
+                    st.header("🎯 Laporan Evaluasi Terperinci (One-vs-Rest)")
+                    
+                    # Bikin 4 Tab Navigasi biar UI rapi
+                    tab_pos, tab_net, tab_neg, tab_gabungan = st.tabs([
+                        "🟢 Khusus Positif", "⚪ Khusus Netral", "🔴 Khusus Negatif", "🔵 Gabungan (Keseluruhan)"
+                    ])
 
                     # ==========================================
-                    # 4. PEMBEDAHAN SEMUA RUMUS 
+                    # TAB 1: POSITIF
                     # ==========================================
-                    st.markdown("---")
-                    st.subheader("🧮 3. Pembedahan Rumus Evaluasi")
-                    st.write("💡 Karena terdapat 3 label (Multiclass), sistem menggunakan pendekatan **Macro-Average**.")
-                    
-                    col_rumus1, col_rumus2 = st.columns(2)
-                    
-                    with col_rumus1:
-                        st.write("**1. Accuracy (Akurasi)**")
-                        st.latex(r"Accuracy = \frac{\text{Total Prediksi Benar}}{\text{Total Data}}")
-                        st.latex(rf"Accuracy = \frac{{{total_benar}}}{{{total_data}}} = {acc*100:.1f}\%")
+                    with tab_pos:
+                        st.subheader("Evaluasi Kelas: Sentimen Positif")
+                        col_gbr, col_rumus = st.columns([1, 1.5])
                         
-                        st.write("**2. Precision (Presisi)**")
-                        st.latex(r"Precision = \frac{TP}{TP + FP}")
-                        st.latex(rf"Precision_{{Macro}} = {precision*100:.1f}\%")
-
-                    with col_rumus2:
-                        st.write("**3. Recall (Sensitivitas)**")
-                        st.latex(r"Recall = \frac{TP}{TP + FN}")
-                        st.latex(rf"Recall_{{Macro}} = {recall*100:.1f}\%")
-                        
-                        st.write("**4. F1-Score**")
-                        st.latex(r"F1 = 2 \times \frac{Precision \times Recall}{Precision + Recall}")
-                        st.latex(rf"F1_{{Macro}} = {f1*100:.1f}\%")
-
-                    # Kesimpulan
-                    kategori_performa = "sangat baik dan sangat akurat" if acc >= 0.85 else "baik dan cukup akurat" if acc >= 0.75 else "masih memerlukan perbaikan"
-                    teks_kesimpulan = f"Berdasarkan pengujian terhadap {total_data} data uji, model IndoBERT menunjukkan performa yang {kategori_performa} dengan nilai akurasi mencapai {acc*100:.1f}%. Rincian matriks menunjukkan kemampuan model dalam membedakan ketiga kelas sentimen secara objektif."
-                    st.success(f"**Kesimpulan:**\n{teks_kesimpulan}")
+                        with col_gbr:
+                            fig_pos, ax_pos = plt.subplots(figsize=(4, 3))
+                            sns.heatmap([[tn_pos, fp_pos], [fn_pos, tp_pos]], annot=True, fmt='d', cmap='Greens',
+                                        xticklabels=['Bukan Positif', 'Positif'], yticklabels=['Bukan Positif', 'Positif'], ax=ax_pos)
+                            ax_pos.set_ylabel('Aktual Asli')
+                            ax_pos.set_xlabel('Prediksi Model')
+                            st.pyplot(fig_pos)
+                            fig_pos.savefig("temp_cm_pos.png", bbox_inches='tight') # Simpan utk PDF
+                            
+                        with col_rumus:
+                            st.write(f"**Rincian Data:** Benar (TP): {tp_pos} | Salah Tebak (FP): {fp_pos} | Gagal Tebak (FN): {fn_pos}")
+                            st.latex(rf"Precision = \frac{{TP}}{{TP + FP}} = \frac{{{tp_pos}}}{{{tp_pos} + {fp_pos}}} = {prec_pos*100:.1f}\%")
+                            st.latex(rf"Recall = \frac{{TP}}{{TP + FN}} = \frac{{{tp_pos}}}{{{tp_pos} + {fn_pos}}} = {rec_pos*100:.1f}\%")
+                            st.latex(rf"F1-Score = 2 \times \frac{{Prec \times Rec}}{{Prec + Rec}} = {f1_pos*100:.1f}\%")
 
                     # ==========================================
-                    # 5. FITUR EXPORT LAPORAN PDF
+                    # TAB 2: NETRAL
+                    # ==========================================
+                    with tab_net:
+                        st.subheader("Evaluasi Kelas: Sentimen Netral")
+                        col_gbr, col_rumus = st.columns([1, 1.5])
+                        
+                        with col_gbr:
+                            fig_net, ax_net = plt.subplots(figsize=(4, 3))
+                            sns.heatmap([[tn_net, fp_net], [fn_net, tp_net]], annot=True, fmt='d', cmap='Greys',
+                                        xticklabels=['Bukan Netral', 'Netral'], yticklabels=['Bukan Netral', 'Netral'], ax=ax_net)
+                            ax_net.set_ylabel('Aktual Asli')
+                            ax_net.set_xlabel('Prediksi Model')
+                            st.pyplot(fig_net)
+                            fig_net.savefig("temp_cm_net.png", bbox_inches='tight')
+                            
+                        with col_rumus:
+                            st.write(f"**Rincian Data:** Benar (TP): {tp_net} | Salah Tebak (FP): {fp_net} | Gagal Tebak (FN): {fn_net}")
+                            st.latex(rf"Precision = \frac{{TP}}{{TP + FP}} = \frac{{{tp_net}}}{{{tp_net} + {fp_net}}} = {prec_net*100:.1f}\%")
+                            st.latex(rf"Recall = \frac{{TP}}{{TP + FN}} = \frac{{{tp_net}}}{{{tp_net} + {fn_net}}} = {rec_net*100:.1f}\%")
+                            st.latex(rf"F1-Score = 2 \times \frac{{Prec \times Rec}}{{Prec + Rec}} = {f1_net*100:.1f}\%")
+
+                    # ==========================================
+                    # TAB 3: NEGATIF
+                    # ==========================================
+                    with tab_neg:
+                        st.subheader("Evaluasi Kelas: Sentimen Negatif")
+                        col_gbr, col_rumus = st.columns([1, 1.5])
+                        
+                        with col_gbr:
+                            fig_neg, ax_neg = plt.subplots(figsize=(4, 3))
+                            sns.heatmap([[tn_neg, fp_neg], [fn_neg, tp_neg]], annot=True, fmt='d', cmap='Reds',
+                                        xticklabels=['Bukan Negatif', 'Negatif'], yticklabels=['Bukan Negatif', 'Negatif'], ax=ax_neg)
+                            ax_neg.set_ylabel('Aktual Asli')
+                            ax_neg.set_xlabel('Prediksi Model')
+                            st.pyplot(fig_neg)
+                            fig_neg.savefig("temp_cm_neg.png", bbox_inches='tight')
+                            
+                        with col_rumus:
+                            st.write(f"**Rincian Data:** Benar (TP): {tp_neg} | Salah Tebak (FP): {fp_neg} | Gagal Tebak (FN): {fn_neg}")
+                            st.latex(rf"Precision = \frac{{TP}}{{TP + FP}} = \frac{{{tp_neg}}}{{{tp_neg} + {fp_neg}}} = {prec_neg*100:.1f}\%")
+                            st.latex(rf"Recall = \frac{{TP}}{{TP + FN}} = \frac{{{tp_neg}}}{{{tp_neg} + {fn_neg}}} = {rec_neg*100:.1f}\%")
+                            st.latex(rf"F1-Score = 2 \times \frac{{Prec \times Rec}}{{Prec + Rec}} = {f1_neg*100:.1f}\%")
+
+                    # ==========================================
+                    # TAB 4: GABUNGAN (KESELURUHAN)
+                    # ==========================================
+                    with tab_gabungan:
+                        st.subheader("🧩 Confusion Matrix Gabungan & Hasil Akhir")
+                        
+                        col_gab1, col_gab2 = st.columns([1, 1.2])
+                        with col_gab1:
+                            label_names = ['Positif', 'Netral', 'Negatif']
+                            fig_cm, ax_cm = plt.subplots(figsize=(6, 5))
+                            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=label_names, yticklabels=label_names, ax=ax_cm)
+                            ax_cm.set_ylabel('Label Aktual (Asli)')
+                            ax_cm.set_xlabel('Label Prediksi (Model)')
+                            st.pyplot(fig_cm)
+                            fig_cm.savefig("temp_cm_gab.png", bbox_inches='tight')
+                        
+                        with col_gab2:
+                            st.write("**Akurasi Keseluruhan (Accuracy):**")
+                            st.latex(rf"Accuracy = \frac{{{total_benar} \text{{ (Benar)}} }}{{{total_data} \text{{ (Total Data)}}}} = {acc*100:.1f}\%")
+                            st.write("**Rata-Rata Makro (Macro-Average):**")
+                            st.info(f"- **Precision Macro:** {precision*100:.1f}%\n- **Recall Macro:** {recall*100:.1f}%\n- **F1-Score Macro:** {f1*100:.1f}%")
+                            
+                            kategori_performa = "sangat baik" if acc >= 0.85 else "cukup baik" if acc >= 0.75 else "masih kurang"
+                            teks_kesimpulan = f"Secara keseluruhan, model mencapai akurasi **{acc*100:.1f}%** ({kategori_performa}). Rincian masing-masing kelas membuktikan bahwa model dapat membedakan opini suporter Timnas dengan proporsional."
+                            st.success(teks_kesimpulan)
+
+                    # ==========================================
+                    # FITUR EXPORT LAPORAN PDF (FULL RAPI)
                     # ==========================================
                     st.markdown("---")
-                    st.subheader("📄 4. Cetak Laporan Evaluasi Full")
+                    st.subheader("📄 Cetak Laporan Evaluasi Full (PDF)")
                     
                     pdf = FPDF()
                     pdf.add_page()
@@ -574,63 +637,63 @@ elif menu == "3. Evaluasi Model":
                     # Judul
                     pdf.set_font("Arial", 'B', 16)
                     pdf.cell(0, 10, txt="Laporan Evaluasi Performa Model IndoBERT", ln=True, align='C')
-                    pdf.set_font("Arial", size=12)
-                    pdf.cell(0, 10, txt="Analisis Sentimen Komentar Instagram @timnasindonesia", ln=True, align='C')
-                    pdf.ln(5)
-                    
-                    # 1. Gambar CM
-                    pdf.set_font("Arial", 'B', 12)
-                    pdf.cell(0, 10, txt="1. Visualisasi Confusion Matrix:", ln=True)
-                    pdf.image("temp_cm.png", x=30, w=150) 
-                    pdf.ln(2)
-                    
-                    # 2. Rincian Matriks (Dimasukkan ke PDF)
-                    pdf.set_font("Arial", 'B', 11)
-                    pdf.cell(0, 8, txt="   Rincian Nilai per Kelas:", ln=True)
                     pdf.set_font("Arial", size=11)
-                    # Positif
-                    pdf.cell(0, 6, txt=f"   - POSITIF : Benar (TP)={tp_pos} | Salah sbg Positif (FP)={fp_pos} | Gagal tebak Positif (FN)={fn_pos}", ln=True)
-                    # Netral
-                    pdf.cell(0, 6, txt=f"   - NETRAL  : Benar (TP)={tp_net} | Salah sbg Netral (FP)={fp_net} | Gagal tebak Netral (FN)={fn_net}", ln=True)
-                    # Negatif
-                    pdf.cell(0, 6, txt=f"   - NEGATIF : Benar (TP)={tp_neg} | Salah sbg Negatif (FP)={fp_neg} | Gagal tebak Negatif (FN)={fn_neg}", ln=True)
+                    pdf.cell(0, 8, txt="Analisis Sentimen Komentar Instagram @timnasindonesia", ln=True, align='C')
                     pdf.ln(5)
                     
-                    # 3. Metrik
+                    # 1. Tiga Gambar CM Individual (Berdampingan)
                     pdf.set_font("Arial", 'B', 12)
-                    pdf.cell(0, 10, txt="2. Hasil Evaluasi Metrik (Macro-Average):", ln=True)
+                    pdf.cell(0, 10, txt="1. Visualisasi Confusion Matrix Per Kelas (One-vs-Rest):", ln=True)
+                    
+                    y_pos = pdf.get_y()
+                    pdf.image("temp_cm_pos.png", x=10, y=y_pos, w=60)
+                    pdf.image("temp_cm_net.png", x=75, y=y_pos, w=60)
+                    pdf.image("temp_cm_neg.png", x=140, y=y_pos, w=60)
+                    pdf.ln(48) # Spasi ke bawah melewati gambar
+                    
+                    # 2. Ringkasan Metrik Individual
+                    pdf.set_font("Arial", 'B', 11)
+                    pdf.cell(0, 8, txt="   Ringkasan Metrik Masing-Masing Kelas:", ln=True)
+                    pdf.set_font("Arial", size=10)
+                    pdf.cell(0, 6, txt=f"   - POSITIF : Prec={prec_pos*100:.1f}% | Rec={rec_pos*100:.1f}% | F1={f1_pos*100:.1f}%  (TP={tp_pos}, FP={fp_pos}, FN={fn_pos})", ln=True)
+                    pdf.cell(0, 6, txt=f"   - NETRAL  : Prec={prec_net*100:.1f}% | Rec={rec_net*100:.1f}% | F1={f1_net*100:.1f}%  (TP={tp_net}, FP={fp_net}, FN={fn_net})", ln=True)
+                    pdf.cell(0, 6, txt=f"   - NEGATIF : Prec={prec_neg*100:.1f}% | Rec={rec_neg*100:.1f}% | F1={f1_neg*100:.1f}%  (TP={tp_neg}, FP={fp_neg}, FN={fn_neg})", ln=True)
+                    pdf.ln(5)
+                    
+                    # 3. Gambar CM Gabungan
+                    pdf.set_font("Arial", 'B', 12)
+                    pdf.cell(0, 10, txt="2. Confusion Matrix Gabungan (Multiclass):", ln=True)
+                    pdf.image("temp_cm_gab.png", x=60, w=90)
+                    pdf.ln(5)
+                    
+                    # 4. Metrik Gabungan
+                    pdf.cell(0, 10, txt="3. Metrik Evaluasi Akhir (Macro-Average):", ln=True)
                     pdf.set_font("Arial", size=11)
                     pdf.cell(0, 6, txt=f"   - Total Data Uji : {total_data} Baris", ln=True)
-                    pdf.cell(0, 6, txt=f"   - Accuracy       : {acc*100:.2f}%", ln=True)
-                    pdf.cell(0, 6, txt=f"   - Precision      : {precision*100:.2f}%", ln=True)
-                    pdf.cell(0, 6, txt=f"   - Recall         : {recall*100:.2f}%", ln=True)
-                    pdf.cell(0, 6, txt=f"   - F1-Score       : {f1*100:.2f}%", ln=True)
+                    pdf.cell(0, 6, txt=f"   - Akurasi (Accuracy)  = ({total_benar}) / ({total_data}) = {acc*100:.2f}%", ln=True)
+                    pdf.cell(0, 6, txt=f"   - Precision (Macro)   = {precision*100:.2f}%", ln=True)
+                    pdf.cell(0, 6, txt=f"   - Recall (Macro)      = {recall*100:.2f}%", ln=True)
+                    pdf.cell(0, 6, txt=f"   - F1-Score (Macro)    = {f1*100:.2f}%", ln=True)
                     pdf.ln(5)
                     
-                    # 4. Rumus (Dipersingkat agar muat di 1 halaman)
-                    pdf.set_font("Arial", 'B', 12)
-                    pdf.cell(0, 10, txt="3. Pembuktian Rumus Evaluasi:", ln=True)
-                    pdf.set_font("Arial", size=11)
-                    pdf.cell(0, 6, txt=f"   A. Accuracy = (Total Prediksi Benar) / (Total Data Uji) = ({total_benar}) / ({total_data}) = {acc*100:.2f}%", ln=True)
-                    pdf.cell(0, 6, txt=f"   B. Precision (Macro-Avg) = {precision*100:.2f}%", ln=True)
-                    pdf.cell(0, 6, txt=f"   C. Recall (Macro-Avg) = {recall*100:.2f}%", ln=True)
-                    pdf.cell(0, 6, txt=f"   D. F1-Score (Macro-Avg) = {f1*100:.2f}%", ln=True)
-                    pdf.ln(5)
-
                     # 5. Kesimpulan
                     pdf.set_font("Arial", 'B', 12)
                     pdf.cell(0, 10, txt="4. Kesimpulan Evaluasi:", ln=True)
                     pdf.set_font("Arial", size=11)
-                    pdf.multi_cell(0, 6, txt=teks_kesimpulan)
+                    
+                    # Clean teks untuk FPDF
+                    teks_bersih_pdf = str(teks_kesimpulan).encode('latin-1', 'replace').decode('latin-1')
+                    pdf.multi_cell(0, 6, txt=teks_bersih_pdf)
 
                     # Generate PDF
                     pdf_bytes = pdf.output(dest='S').encode('latin-1')
                     
+                    # SUDAH DIPERBAIKI: width="stretch"
                     st.download_button(
                         label="📥 Download Full Laporan (PDF)",
                         data=pdf_bytes,
-                        file_name="laporan_evaluasi_indobert_lengkap.pdf",
+                        file_name="laporan_evaluasi_indobert_ovr_lengkap.pdf",
                         mime="application/pdf",
                         type="primary",
-                        use_container_width=True
+                        width="stretch" 
                     )
