@@ -12,6 +12,7 @@ import io
 from fpdf import FPDF
 import plotly.graph_objects as go
 from streamlit_option_menu import option_menu
+import altair as alt
 
 # ==========================================
 # 1. SETUP PAGE & KONFIGURASI
@@ -93,27 +94,52 @@ if menu == "Komentar Tunggal":
             st.warning("Komentarnya jangan kosong dong, bro!")
         else:
             with st.spinner("Model sedang menganalisis pola kalimat..."):
-                # A. Preprocessing
-                clean_text = preprocess_text(user_input)
+                
+                # ==========================================
+                # A. PREPROCESSING BERTAHAP (UNTUK UI)
+                # ==========================================
+                raw_text = str(user_input)
+                step_casefolding = raw_text.lower()
+                step_cleansing1 = re.sub(r'@[A-Za-z0-9_]+|#\w+|http\S+|www\S+|https\S+', '', step_casefolding, flags=re.MULTILINE)
+                step_cleansing2 = re.sub(r'[^a-z\s]', ' ', step_cleansing1)
+                clean_text = re.sub(r'\s+', ' ', step_cleansing2).strip()
 
-                # B. Tokenization
+                # ==========================================
+                # B. TOKENIZATION & PREDIKSI AI
+                # ==========================================
                 inputs = tokenizer(clean_text, return_tensors="pt", truncation=True, padding=True, max_length=128)
 
-                # C. Prediksi dengan Model
                 with torch.no_grad():
                     outputs = model(**inputs)
+                    # Mengubah logit (skor mentah) menjadi probabilitas 0-100% menggunakan Softmax
                     probs = F.softmax(outputs.logits, dim=1).squeeze()
+                    # TAMPILKAN INI BARU: Ambil skor mentah (logits) untuk perhitungan manual
+                    logits = outputs.logits.squeeze().tolist()
 
                 prob_positif = probs[0].item() * 100
                 prob_netral = probs[1].item() * 100
                 prob_negatif = probs[2].item() * 100
+                
+                z_pos, z_net, z_neg = logits[0], logits[1], logits[2]
 
                 predicted_class_id = torch.argmax(probs).item()
                 label_map = {0: "Positif", 1: "Netral", 2: "Negatif"}
                 sentiment = label_map[predicted_class_id]
                 confidence_score = max(prob_positif, prob_netral, prob_negatif)
 
-                # D. Logika Penjelasan Dinamis (Summary)
+                # ==========================================
+                # C. DETEKSI KATA KUNCI (EXPLAINABILITY)
+                # ==========================================
+                # Dictionary sederhana untuk menangkap kata yang mempengaruhi model
+                kata_positif = ['bagus', 'keren', 'menang', 'bangga', 'mantap', 'hebat', 'terbaik', 'top', 'berkembang']
+                kata_negatif = ['jelek', 'kalah', 'kecewa', 'buruk', 'pecat', 'lemah', 'payah', 'bapuk', 'evaluasi']
+                
+                found_pos = [w for w in clean_text.split() if w in kata_positif]
+                found_neg = [w for w in clean_text.split() if w in kata_negatif]
+
+                # ==========================================
+                # D. LOGIKA PENJELASAN DINAMIS (SUMMARY)
+                # ==========================================
                 if sentiment == "Positif":
                     alasan_kalimat = "Berdasarkan pola bahasa, model mendeteksi adanya kosakata yang menunjukkan dukungan, pujian, atau rasa bangga terhadap performa Timnas Indonesia."
                 elif sentiment == "Negatif":
@@ -122,46 +148,46 @@ if menu == "Komentar Tunggal":
                     alasan_kalimat = "Model tidak menemukan kecenderungan emosi yang kuat. Kalimat ini diklasifikasikan sebagai netral karena sifatnya yang informatif atau ambigu."
 
                 if confidence_score >= 90:
-                    alasan_angka = f"Model **sangat yakin** dengan prediksi ini karena emosi dalam kalimat sangat eksplisit."
+                    alasan_angka = f"Model **sangat yakin** dengan prediksi ini."
                 elif confidence_score >= 70:
-                    alasan_angka = f"Model **cukup yakin** dengan prediksi ini, meskipun masih ada sedikit ambiguitas gaya bahasa."
+                    alasan_angka = f"Model **cukup yakin** dengan prediksi ini."
                 else:
-                    alasan_angka = f"Model **kurang yakin** karena gaya bahasa mengandung unsur sarkasme, atau emosi yang campur aduk antar sentimen."
+                    alasan_angka = f"Model **kurang yakin** (probabilitas terbagi rata)."
 
                 penjelasan_lengkap = f"{alasan_kalimat} {alasan_angka}"
 
-                # E. Tampilkan Hasil (UI Output)
+                # ==========================================
+                # E. TAMPILAN OUTPUT (UI)
+                # ==========================================
                 st.markdown("---")
                 st.subheader("📊 Hasil Analisis")
 
-                # Bikin layout 2 kolom proporsional (kiri untuk teks, kanan untuk grafik)
+                # Membagi layout menjadi 2 kolom
                 col1, col2 = st.columns([1.2, 1])
                 
                 with col1:
-                    st.metric(label="Prediksi Sentimen", value=sentiment)
+                    st.metric(label="Prediksi Sentimen Akhir", value=sentiment)
                     st.info(f"**💡 Mengapa hasilnya demikian?**\n\n{penjelasan_lengkap}")
                     
-                    # FITUR BARU: Di Balik Layar (Preprocessing)
-                    with st.expander("🔍 Di Balik Layar: Proses Preprocessing Teks"):
-                        st.write("**Teks Asli (Kotor):**")
-                        st.code(user_input, language="text")
-                        st.write("**Teks Bersih (Yang dibaca AI):**")
-                        st.code(clean_text, language="text")
-                        st.caption("Huruf kapital, tanda baca, link, dan emoji telah dihapus agar model lebih fokus pada makna kata dasar.")
-
+                    # Menampilkan kata kunci jika terdeteksi
+                    if found_pos or found_neg:
+                        st.write("**🔍 Kata Kunci yang Terdeteksi:**")
+                        if found_pos: 
+                            st.success(f"Mendorong ke arah Positif: {', '.join(found_pos)}")
+                        if found_neg: 
+                            st.error(f"Mendorong ke arah Negatif: {', '.join(found_neg)}")
+                    
                 with col2:
-                    # FITUR BARU: Gauge Chart (Speedometer)
-                    # Menentukan warna speedometer berdasarkan sentimen
-                    warna_bar = "#95a5a6" # Default Abu-abu
-                    if sentiment == "Positif":
-                        warna_bar = "#2ecc71" # Hijau
-                    elif sentiment == "Negatif":
-                        warna_bar = "#e74c3c" # Merah
+                    # Menentukan warna berdasarkan sentimen
+                    warna_bar = "#95a5a6" # Default Abu-abu (Netral)
+                    if sentiment == "Positif": warna_bar = "#2ecc71" # Hijau
+                    elif sentiment == "Negatif": warna_bar = "#e74c3c" # Merah
                         
+                    # Grafik Speedometer (Gauge)
                     fig_gauge = go.Figure(go.Indicator(
                         mode = "gauge+number",
                         value = confidence_score,
-                        title = {'text': "Tingkat Keyakinan Model", 'font': {'size': 18}},
+                        title = {'text': "Keyakinan Model", 'font': {'size': 18}},
                         number = {'suffix': "%", 'valueformat': ".1f", 'font': {'size': 40, 'color': warna_bar}},
                         gauge = {
                             'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "darkblue"},
@@ -175,21 +201,99 @@ if menu == "Komentar Tunggal":
                             ],
                         }
                     ))
-                    
-                    # Menyesuaikan margin biar rapi di kolom kanan
-                    fig_gauge.update_layout(margin=dict(l=20, r=20, t=50, b=20), height=280)
-                    st.plotly_chart(fig_gauge, width='stretch')
-                    
-                    # Detail Probabilitas dipindah ke bawah grafik
-                    with st.expander("📈 Lihat Detail Probabilitas Semua Kelas"):
-                        st.write(f"- 🟢 Positif: {prob_positif:.2f}%")
-                        st.write(f"- ⚪ Netral: {prob_netral:.2f}%")
-                        st.write(f"- 🔴 Negatif: {prob_negatif:.2f}%")
-                    
+                    fig_gauge.update_layout(margin=dict(l=20, r=20, t=50, b=20), height=250)
+                    st.plotly_chart(fig_gauge, use_container_width=True)
+
+                # --- VISUALISASI BAR CHART & PENJELASAN MATEMATIS ---
+                st.markdown("### 📈 Detail Probabilitas Kelas")
+                
+                # Buat DataFrame untuk Bar Chart
+                df_probs = pd.DataFrame({
+                    'Sentimen': ['Positif', 'Netral', 'Negatif'],
+                    'Persentase (%)': [prob_positif, prob_netral, prob_negatif],
+                    'Warna': ['#2ecc71', '#95a5a6', '#e74c3c']
+                })
+
+                # Visualisasi menggunakan Altair
+                chart = alt.Chart(df_probs).mark_bar(cornerRadiusEnd=4, height=30).encode(
+                    x=alt.X('Persentase (%):Q', scale=alt.Scale(domain=[0, 100])),
+                    y=alt.Y('Sentimen:N', sort=None, title=""),
+                    color=alt.Color('Warna:N', scale=None),
+                    tooltip=['Sentimen', alt.Tooltip('Persentase (%):Q', format='.2f')]
+                ).properties(height=150)
+                
+                st.altair_chart(chart, use_container_width=True)
+
+                # --- EXPANDERS (DI BALIK LAYAR) ---
+                col_exp1, col_exp2 = st.columns(2)
+                
+                with col_exp1:
+                    with st.expander("🛠️ Tahapan Preprocessing NLP"):
+                        st.markdown("**1. Teks Asli**")
+                        st.code(raw_text, language="text")
+                        st.markdown("**2. Case Folding**")
+                        st.code(step_casefolding, language="text")
+                        st.markdown("**3. Cleansing (URL, Mention, Hashtag)**")
+                        st.code(step_cleansing1, language="text")
+                        st.markdown("**4. Cleansing (Simbol & Angka)**")
+                        st.code(step_cleansing2, language="text")
+                        st.markdown("**5. Teks Bersih Akhir**")
+                        st.code(clean_text, language="text")
+
+                with col_exp2:
+                    with st.expander("🤔 Kok Bisa Dapat Angka Tersebut? (Detail Matematika)"):
+                        st.write("Persentase keyakinan didapatkan menggunakan fungsi matematis bernama **Softmax**. Fungsi ini mengubah skor mentah (*logits*) dari AI menjadi probabilitas berskala 0 hingga 100%.")
+                        
+                        # 1. Rumus Umum
+                        st.latex(r"P(i) = \frac{e^{z_i}}{\sum_{j=1}^{K} e^{z_j}}")
+                        
+                        st.markdown(r"""
+                        **Keterangan:**
+                        *   $P(i)$ = Probabilitas hasil akhir (0-1)
+                        *   $z_i$ = Skor mentah (*logit*) dari model
+                        *   $e$ = Bilangan Euler ($\approx 2.718$)
+                        """)
+                        
+                        st.divider()
+                        
+                        # 2. Nilai Logits Mentah
+                        st.markdown("**1️⃣ Skor Mentah (Logits) dari Model:**")
+                        st.write(f"- $z_{{positif}}$ = `{z_pos:.4f}`")
+                        st.write(f"- $z_{{netral}}$ = `{z_net:.4f}`")
+                        st.write(f"- $z_{{negatif}}$ = `{z_neg:.4f}`")
+                        
+                        # 3. Substitusi ke Rumus
+                        st.markdown(f"**2️⃣ Memasukkan ke Rumus Softmax (fokus ke {sentiment}):**")
+                        
+                        # Mengambil nilai logit dari sentimen yang menang
+                        z_menang = logits[predicted_class_id]
+                        
+                        # Membuat string LaTeX dinamis untuk rumus
+                        str_num = f"e^{{{z_menang:.2f}}}"
+                        str_den = f"e^{{{z_pos:.2f}}} + e^{{{z_net:.2f}}} + e^{{{z_neg:.2f}}}"
+                        st.latex(rf"P(\text{{{sentiment}}}) = \frac{{{str_num}}}{{{str_den}}}")
+                        
+                        # 4. Hasil Eksponensial (e^z)
+                        import math
+                        exp_pos = math.exp(z_pos)
+                        exp_net = math.exp(z_net)
+                        exp_neg = math.exp(z_neg)
+                        total_exp = exp_pos + exp_net + exp_neg
+                        exp_menang = math.exp(z_menang)
+                        
+                        st.markdown("**3️⃣ Menghitung Nilai Eksponensial ($e^z$):**")
+                        st.latex(rf"P(\text{{{sentiment}}}) = \frac{{{exp_menang:.2f}}}{{{exp_pos:.2f} + {exp_net:.2f} + {exp_neg:.2f}}}")
+                        
+                        # 5. Hasil Pembagian Akhir
+                        prob_final = exp_menang / total_exp
+                        st.markdown("**4️⃣ Hasil Akhir:**")
+                        st.latex(rf"P(\text{{{sentiment}}}) = \frac{{{exp_menang:.2f}}}{{{total_exp:.2f}}} = {prob_final:.4f}")
+                        
+                        st.info(f"Karena $P({sentiment})$ adalah **{prob_final:.4f}**, jika dikalikan 100%, kita mendapatkan persentase final yaitu **{prob_final * 100:.2f}%**!")
+                        
 # ----------------------------------------------------
 # MENU 2: ANALISIS DATASET (TANPA LABEL)
 # ----------------------------------------------------
-
 elif menu == "Analisis Dataset":
     st.title("📊 Analisis Dataset Komentar")
     st.write("Upload file CSV/Excel tanpa label. Sistem akan mengklasifikasikan, mengukur probabilitas, dan membuatkan laporan otomatis.")
@@ -208,13 +312,35 @@ elif menu == "Analisis Dataset":
         else:
             st.success(f"✅ File berhasil diunggah! Total data: {len(df)} baris.")
             
+            # ==========================================
+            # FITUR BARU: EDUKASI PREPROCESSING DATASET
+            # ==========================================
+            st.markdown("---")
+            st.subheader("🛠️ Di Balik Layar: Simulasi Preprocessing Data")
+            st.write("Sebelum model AI bekerja secara massal, sistem akan membersihkan teks dari simbol, link, dan emoji. Berikut adalah simulasi tahapan pembersihan pada 5 baris pertama dataset Anda:")
+            
+            with st.expander("🔍 Buka Tabel Tahapan Preprocessing (Top 5 Data)"):
+                # Kita bikin dataframe tiruan khusus untuk pamer proses step-by-step
+                df_preview = df.head(5).copy()
+                df_preview['1. Teks Asli'] = df_preview['komentar'].astype(str)
+                df_preview['2. Case Folding'] = df_preview['1. Teks Asli'].str.lower()
+                df_preview['3. Hapus Link/Tag'] = df_preview['2. Case Folding'].apply(lambda x: re.sub(r'@[A-Za-z0-9_]+|#\w+|http\S+|www\S+|https\S+', '', x, flags=re.MULTILINE))
+                df_preview['4. Hapus Simbol'] = df_preview['3. Hapus Link/Tag'].apply(lambda x: re.sub(r'[^a-z\s]', ' ', x))
+                df_preview['5. Teks Bersih Akhir'] = df_preview['4. Hapus Simbol'].apply(lambda x: re.sub(r'\s+', ' ', x).strip())
+                
+                st.dataframe(df_preview[['1. Teks Asli', '2. Case Folding', '3. Hapus Link/Tag', '4. Hapus Simbol', '5. Teks Bersih Akhir']])
+                st.caption("Proses ini otomatis diterapkan pada seluruh baris data di belakang layar agar model dapat fokus menganalisis emosi dari kata dasarnya saja.")
+
+            # ==========================================
+            # PROSES ANALISIS & PREDIKSI
+            # ==========================================
             if st.button("🚀 Mulai Analisis Massal & Buat Laporan", type="primary"):
                 
                 progress_text = "AI sedang membaca, memprediksi, dan mengkalkulasi probabilitas. Mohon tunggu..."
                 my_bar = st.progress(0, text=progress_text)
                 
                 sentimens = []
-                label_ints = [] # Menyimpan angka 0, 1, 2
+                label_ints = [] 
                 prob_pos_list = []
                 prob_net_list = []
                 prob_neg_list = []
@@ -238,7 +364,7 @@ elif menu == "Analisis Dataset":
                     
                     # Simpan data ke list
                     sentimens.append(label_map[pred_id])
-                    label_ints.append(pred_id) # Menyimpan ID murni (0, 1, 2)
+                    label_ints.append(pred_id) 
                     prob_pos_list.append(f"{p_pos:.1f}%")
                     prob_net_list.append(f"{p_net:.1f}%")
                     prob_neg_list.append(f"{p_neg:.1f}%")
@@ -249,7 +375,7 @@ elif menu == "Analisis Dataset":
                 
                 # Masukkan list ke dalam DataFrame
                 df['Prediksi_Sentimen'] = sentimens
-                df['label'] = label_ints # Kolom baru berisi 0, 1, atau 2
+                df['label'] = label_ints 
                 df['Prob_Positif'] = prob_pos_list
                 df['Prob_Netral'] = prob_net_list
                 df['Prob_Negatif'] = prob_neg_list
@@ -387,7 +513,7 @@ elif menu == "Analisis Dataset":
                 pdf.cell(0, 6, txt="*Catatan: Ini hanya pratinjau. Unduh file Excel/CSV untuk melihat seluruh data.", ln=True)
                 pdf.ln(3)
                 
-                # Header Tabel PDF (Disesuaikan dengan format baru)
+                # Header Tabel PDF
                 pdf.set_fill_color(200, 220, 255)
                 pdf.set_font("Arial", 'B', 8)
                 pdf.cell(85, 8, "Komentar (Dipotong)", border=1, fill=True)
@@ -438,16 +564,16 @@ elif menu == "Analisis Dataset":
                 col_dl1, col_dl2, col_dl3 = st.columns(3)
                 
                 with col_dl1: # Tombol PDF
-                    st.download_button("📥 Laporan PDF Lengkap", data=pdf_bytes, file_name='Laporan_Analisis_Timnas.pdf', mime='application/pdf', type='primary', use_container_width=True)
+                    st.download_button("📥 Laporan PDF Lengkap", data=pdf_bytes, file_name='Laporan_Analisis_Timnas.pdf', mime='application/pdf', type='primary', width='stretch')
                 with col_dl2: # Tombol CSV
                     csv_hasil = df[kolom_tampil].to_csv(index=False).encode('utf-8')
-                    st.download_button("📥 Data CSV (.csv)", data=csv_hasil, file_name='dataset_timnas_berlabel.csv', mime='text/csv', use_container_width=True)
+                    st.download_button("📥 Data CSV (.csv)", data=csv_hasil, file_name='dataset_timnas_berlabel.csv', mime='text/csv', width='stretch')
                 with col_dl3: # Tombol Excel
                     excel_buffer = io.BytesIO()
                     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
                         df[kolom_tampil].to_excel(writer, index=False, sheet_name='Hasil Sentimen')
-                    st.download_button("📥 Data Excel (.xlsx)", data=excel_buffer.getvalue(), file_name='dataset_timnas_berlabel.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', use_container_width=True)
-                    
+                    st.download_button("📥 Data Excel (.xlsx)", data=excel_buffer.getvalue(), file_name='dataset_timnas_berlabel.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', width='stretch')
+
 # ----------------------------------------------------
 # MENU 3: EVALUASI PERFORMA MODEL
 # ----------------------------------------------------
@@ -471,6 +597,27 @@ elif menu == "Evaluasi Model":
         else:
             st.success(f"✅ Dataset berhasil dimuat! Total: {len(df_test)} baris data uji.")
             
+            # ==========================================
+            # FITUR BARU: EDUKASI PREPROCESSING DATA UJI
+            # ==========================================
+            st.markdown("---")
+            st.subheader("🛠️ Di Balik Layar: Simulasi Preprocessing Data Uji")
+            st.write("Sesuai standar pengujian Machine Learning, data uji (Testing Data) juga harus melewati tahap pembersihan yang sama persis dengan data latih. Berikut simulasinya:")
+            
+            with st.expander("🔍 Buka Tabel Tahapan Preprocessing (Top 5 Data Uji)"):
+                df_preview_test = df_test.head(5).copy()
+                df_preview_test['1. Teks Asli'] = df_preview_test['komentar'].astype(str)
+                df_preview_test['2. Case Folding'] = df_preview_test['1. Teks Asli'].str.lower()
+                df_preview_test['3. Hapus Link/Tag'] = df_preview_test['2. Case Folding'].apply(lambda x: re.sub(r'@[A-Za-z0-9_]+|#\w+|http\S+|www\S+|https\S+', '', x, flags=re.MULTILINE))
+                df_preview_test['4. Hapus Simbol'] = df_preview_test['3. Hapus Link/Tag'].apply(lambda x: re.sub(r'[^a-z\s]', ' ', x))
+                df_preview_test['5. Teks Bersih Akhir'] = df_preview_test['4. Hapus Simbol'].apply(lambda x: re.sub(r'\s+', ' ', x).strip())
+                
+                st.dataframe(df_preview_test[['label', '1. Teks Asli', '2. Case Folding', '3. Hapus Link/Tag', '4. Hapus Simbol', '5. Teks Bersih Akhir']])
+                st.caption("Label asli tetap dipertahankan, sementara teks dibersihkan agar model dapat menebak secara adil tanpa terpengaruh noise.")
+
+            # ==========================================
+            # PROSES EVALUASI & METRIK
+            # ==========================================
             if st.button("🚀 Mulai Evaluasi Model", type="primary"):
                 with st.spinner("Model sedang memprediksi dan membandingkan hasil..."):
                     
@@ -486,9 +633,7 @@ elif menu == "Evaluasi Model":
                             pred_id = torch.argmax(F.softmax(outputs.logits, dim=1)).item()
                         y_pred.append(pred_id)
 
-                    # ==========================================
-                    # KALKULASI METRIK & MATRIKS (OvR & GABUNGAN)
-                    # ==========================================
+                    # Kalkulasi Metrik & Matriks (OvR & Gabungan)
                     cm = confusion_matrix(y_true, y_pred, labels=[0, 1, 2])
                     total_data = len(df_test)
                     
@@ -528,14 +673,12 @@ elif menu == "Evaluasi Model":
                     st.markdown("---")
                     st.header("🎯 Laporan Evaluasi Terperinci (One-vs-Rest)")
                     
-                    # Bikin 4 Tab Navigasi biar UI rapi
+                    # TABS NAVIGASI
                     tab_pos, tab_net, tab_neg, tab_gabungan = st.tabs([
                         "🟢 Khusus Positif", "⚪ Khusus Netral", "🔴 Khusus Negatif", "🔵 Gabungan (Keseluruhan)"
                     ])
 
-                    # ==========================================
                     # TAB 1: POSITIF
-                    # ==========================================
                     with tab_pos:
                         st.subheader("Evaluasi Kelas: Sentimen Positif")
                         col_gbr, col_rumus = st.columns([1, 1.5])
@@ -547,7 +690,7 @@ elif menu == "Evaluasi Model":
                             ax_pos.set_ylabel('Aktual Asli')
                             ax_pos.set_xlabel('Prediksi Model')
                             st.pyplot(fig_pos)
-                            fig_pos.savefig("temp_cm_pos.png", bbox_inches='tight') # Simpan utk PDF
+                            fig_pos.savefig("temp_cm_pos.png", bbox_inches='tight') 
                             
                         with col_rumus:
                             st.write(f"**Rincian Data:** Benar (TP): {tp_pos} | Salah Tebak (FP): {fp_pos} | Gagal Tebak (FN): {fn_pos}")
@@ -555,9 +698,7 @@ elif menu == "Evaluasi Model":
                             st.latex(rf"Recall = \frac{{TP}}{{TP + FN}} = \frac{{{tp_pos}}}{{{tp_pos} + {fn_pos}}} = {rec_pos*100:.1f}\%")
                             st.latex(rf"F1-Score = 2 \times \frac{{Prec \times Rec}}{{Prec + Rec}} = {f1_pos*100:.1f}\%")
 
-                    # ==========================================
                     # TAB 2: NETRAL
-                    # ==========================================
                     with tab_net:
                         st.subheader("Evaluasi Kelas: Sentimen Netral")
                         col_gbr, col_rumus = st.columns([1, 1.5])
@@ -577,9 +718,7 @@ elif menu == "Evaluasi Model":
                             st.latex(rf"Recall = \frac{{TP}}{{TP + FN}} = \frac{{{tp_net}}}{{{tp_net} + {fn_net}}} = {rec_net*100:.1f}\%")
                             st.latex(rf"F1-Score = 2 \times \frac{{Prec \times Rec}}{{Prec + Rec}} = {f1_net*100:.1f}\%")
 
-                    # ==========================================
                     # TAB 3: NEGATIF
-                    # ==========================================
                     with tab_neg:
                         st.subheader("Evaluasi Kelas: Sentimen Negatif")
                         col_gbr, col_rumus = st.columns([1, 1.5])
@@ -599,9 +738,7 @@ elif menu == "Evaluasi Model":
                             st.latex(rf"Recall = \frac{{TP}}{{TP + FN}} = \frac{{{tp_neg}}}{{{tp_neg} + {fn_neg}}} = {rec_neg*100:.1f}\%")
                             st.latex(rf"F1-Score = 2 \times \frac{{Prec \times Rec}}{{Prec + Rec}} = {f1_neg*100:.1f}\%")
 
-                    # ==========================================
-                    # TAB 4: GABUNGAN (KESELURUHAN)
-                    # ==========================================
+                    # TAB 4: GABUNGAN
                     with tab_gabungan:
                         st.subheader("🧩 Confusion Matrix Gabungan & Hasil Akhir")
                         
@@ -626,7 +763,7 @@ elif menu == "Evaluasi Model":
                             st.success(teks_kesimpulan)
 
                     # ==========================================
-                    # FITUR EXPORT LAPORAN PDF (FULL RAPI)
+                    # FITUR EXPORT LAPORAN PDF
                     # ==========================================
                     st.markdown("---")
                     st.subheader("📄 Cetak Laporan Evaluasi Full (PDF)")
@@ -641,7 +778,7 @@ elif menu == "Evaluasi Model":
                     pdf.cell(0, 8, txt="Analisis Sentimen Komentar Instagram @timnasindonesia", ln=True, align='C')
                     pdf.ln(5)
                     
-                    # 1. Tiga Gambar CM Individual (Berdampingan)
+                    # 1. Gambar CM Individual
                     pdf.set_font("Arial", 'B', 12)
                     pdf.cell(0, 10, txt="1. Visualisasi Confusion Matrix Per Kelas (One-vs-Rest):", ln=True)
                     
@@ -649,7 +786,7 @@ elif menu == "Evaluasi Model":
                     pdf.image("temp_cm_pos.png", x=10, y=y_pos, w=60)
                     pdf.image("temp_cm_net.png", x=75, y=y_pos, w=60)
                     pdf.image("temp_cm_neg.png", x=140, y=y_pos, w=60)
-                    pdf.ln(48) # Spasi ke bawah melewati gambar
+                    pdf.ln(48)
                     
                     # 2. Ringkasan Metrik Individual
                     pdf.set_font("Arial", 'B', 11)
@@ -681,14 +818,11 @@ elif menu == "Evaluasi Model":
                     pdf.cell(0, 10, txt="4. Kesimpulan Evaluasi:", ln=True)
                     pdf.set_font("Arial", size=11)
                     
-                    # Clean teks untuk FPDF
                     teks_bersih_pdf = str(teks_kesimpulan).encode('latin-1', 'replace').decode('latin-1')
                     pdf.multi_cell(0, 6, txt=teks_bersih_pdf)
 
-                    # Generate PDF
                     pdf_bytes = pdf.output(dest='S').encode('latin-1')
                     
-                    # SUDAH DIPERBAIKI: width="stretch"
                     st.download_button(
                         label="📥 Download Full Laporan (PDF)",
                         data=pdf_bytes,
